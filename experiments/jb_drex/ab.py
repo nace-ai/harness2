@@ -1,7 +1,8 @@
 """A/B driver: does a Drex document helper raise JobBench scores for OpenCode?
 
 Arm `base` is the stock JobBench OpenCode harness. Arm `drex` is the same tree plus
-scripts/drex_read.py. The driver calls the adapter's execute() and score() directly.
+scripts/drex_read.py and one tool-guidance line that sends PDFs and images to it. The
+driver calls the adapter's execute() and score() directly.
 
 Run from the harness2 checkout (so ROOT, .env and dependencies/ resolve):
     python experiments/jb_drex/ab.py --out runs/jb-ab --tasks <profession>/task<N> ... \
@@ -28,6 +29,11 @@ JUDGE_MODEL = "claude-sonnet-5-5"
 JUDGE_API_BASE = "https://api.anthropic.com/v1"
 HELPER = Path(__file__).with_name("drex_read.py")
 HELPER_CALL = re.compile(r"python3?\s+\S*drex_read\.py")
+TOOL_GUIDANCE = (
+    "To read a PDF, a scanned page or an image, run `python scripts/drex_read.py <file>` "
+    "first and work from its Markdown. Open the original file only to check a detail the "
+    "Markdown leaves unclear.\n"
+)
 JUDGE_SHIM = """\
 import functools
 import sys
@@ -117,11 +123,13 @@ def install_judge_shim() -> Path:
 
 
 def build_drex_harness(adapter: JobBenchAdapter, dest: Path) -> Path:
-    """The base harness plus scripts/drex_read.py; rebuilt only when the content differs."""
+    """The base harness plus scripts/drex_read.py and a tool-guidance line pointing PDFs and
+    images at it; rebuilt only when the content differs."""
     scratch = Path(tempfile.mkdtemp(prefix="harness_drex_", dir=dest.parent))
     try:
         shutil.copytree(adapter.base_harness(), scratch, dirs_exist_ok=True)
         shutil.copy(HELPER, scratch / "scripts" / HELPER.name)
+        (scratch / "tool_descriptions" / "tool_guidance.md").write_text(TOOL_GUIDANCE, encoding="utf-8")
         if dest.is_dir() and RM.fingerprint(dest) == RM.fingerprint(scratch):
             return dest
         shutil.rmtree(dest, ignore_errors=True)
@@ -147,9 +155,10 @@ def rendered_helper_line(adapter: JobBenchAdapter, harness: Path) -> str:
     finally:
         shutil.rmtree(install.staging_dir, ignore_errors=True)
     lines = [ln for ln in body.splitlines() if HELPER.name in ln]
-    if len(lines) != 1:
-        raise RuntimeError(f"expected one {HELPER.name} line in the rendered AGENTS.md: {lines}")
-    return lines[0]
+    if (len(lines) != 2 or lines[0] != TOOL_GUIDANCE.strip()
+            or not lines[1].startswith("- `python")):
+        raise RuntimeError(f"expected the guidance and listing lines for {HELPER.name}: {lines}")
+    return "\n".join(lines)
 
 
 def run_dir_for(adapter: JobBenchAdapter, job: Job) -> Path:
