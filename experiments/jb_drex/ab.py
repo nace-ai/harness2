@@ -61,6 +61,9 @@ def _arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--concurrency", type=int, default=1)
     p.add_argument("--dry-run", action="store_true", help="print jobs and the helper line only")
     p.add_argument("--judge-only", action="store_true", help="score existing run dirs only")
+    p.add_argument("--effort", default="medium",
+                   help="Anthropic solver effort; the API default thinks ~30k tokens a step "
+                        "and times JobBench tasks out")
     return p
 
 
@@ -356,6 +359,10 @@ def print_summary(s: dict, arms: list[str]) -> None:
 def main() -> int:
     args = _ARGS
     wire_judge()
+    provider, _, model = config.SOLVER_MODEL_OC.partition("/")
+    os.environ["OPENCODE_CONFIG_CONTENT"] = json.dumps(
+        {"provider": {provider: {"models": {model: {"options": {"effort": args.effort}}}}}}
+    )
     install_judge_shim()
     adapter = make_adapter("jb", None, "oc")
     if not isinstance(adapter, JobBenchAdapter):
@@ -385,7 +392,7 @@ def main() -> int:
     print(f"out: {OUT}\nstore: {adapter.store}")
     print(f"judge: model={config.JB_JUDGE_MODEL} base={config.JB_JUDGE_API_BASE} "
           f"effort={config.JB_JUDGE_REASONING_EFFORT}")
-    print(f"solver: {config.SOLVER_MODEL_OC}")
+    print(f"solver: {config.SOLVER_MODEL_OC} effort={args.effort}")
     if helper_line:
         print(f"drex tree: {census}\nrendered helper line: {helper_line}")
     print(f"{len(jobs)} jobs ({len(tasks)} tasks x {len(arms)} arms x {args.repeats} repeats), "
