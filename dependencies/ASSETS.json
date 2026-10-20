@@ -19,7 +19,7 @@
   "third_party/lab_runner/opencode/render.py": "b636a60d039fdfa66d64eb5d5d3c93a99464be2bcbd5b80dc8f91d1f104ea5ee",
   "third_party/lab_runner/opencode/render_tree.py": "54d64b461e430905b212b46902512aad38d3585fb5921b7a9982eea0413a4b73",
   "third_party/lab_runner/opencode/run_opencode.py": "7e7178583a6acb2e07bffd1fbef78f1b0095975bc2c61f8b0038fcc528090e32",
-  "third_party/lab_runner/opencode/scripts/read_doc.py": "6b3c8feb3b90b0b2bbbf4cb491c81f1114b67ada04d2c988fac8cb1af68533b5",
+  "third_party/lab_runner/opencode/scripts/read_doc.py": "abf8fbb0505dfb772a2c734184bd1a66a4c6285d53d486a6899eec8ebfc3306d",
   "third_party/lab_runner/opencode/session.py": "e804e29a20ac4fd71454c85b9e15432cf303739c7f8d7aacc0df19f732bfcb62",
   "third_party/lab_runner/tts_lab/__init__.py": "4ae8a9112bc00a182c983a35c8c5db40717007cefbc1b0bed89f04bc384a0106",
   "third_party/lab_runner/tts_lab/config.py": "f6eb8551c3cb3538de42a2e43cd5cd1aa466370d64dd681e46ec70f1c3dcf965",
