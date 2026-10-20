@@ -28,6 +28,22 @@ JUDGE_MODEL = "claude-sonnet-5-5"
 JUDGE_API_BASE = "https://api.anthropic.com/v1"
 HELPER = Path(__file__).with_name("drex_read.py")
 HELPER_CALL = re.compile(r"python3?\s+\S*drex_read\.py")
+JUDGE_SHIM = """\
+import functools
+import sys
+
+if sys.argv and sys.argv[0].endswith("judge.py"):
+    from openai.resources.chat.completions import Completions
+
+    _create = Completions.create
+
+    @functools.wraps(_create)
+    def create(self, *args, **kwargs):
+        kwargs.pop("temperature", None)
+        return _create(self, *args, **kwargs)
+
+    Completions.create = create
+"""
 
 
 def _arg_parser() -> argparse.ArgumentParser:
@@ -83,6 +99,21 @@ def wire_judge() -> None:
     config.JUDGE_MODEL = config.JB_JUDGE_MODEL = JUDGE_MODEL
     config.JB_JUDGE_API_BASE = JUDGE_API_BASE
     config.JB_JUDGE_API_KEY = key
+
+
+def install_judge_shim() -> Path:
+    """Make judge.py omit `temperature`, which claude-sonnet-5-5 rejects with a 400.
+
+    judge.py hardcodes temperature=0.0. A sitecustomize on the judge subprocess's
+    PYTHONPATH strips it from the one call, leaving the JobBench checkout untouched.
+    """
+    shim = OUT / "judge_shim"
+    shim.mkdir(parents=True, exist_ok=True)
+    (shim / "sitecustomize.py").write_text(JUDGE_SHIM, encoding="utf-8")
+    os.environ["PYTHONPATH"] = os.pathsep.join(
+        p for p in (str(shim), os.environ.get("PYTHONPATH")) if p
+    )
+    return shim
 
 
 def build_drex_harness(adapter: JobBenchAdapter, dest: Path) -> Path:
@@ -173,6 +204,22 @@ def usage_from_events(traj_dir: Path) -> dict:
     }
 
 
+def judge_failure(adapter: JobBenchAdapter, job: Job) -> str:
+    """Why a delivered run has no score: the judge's own quarantined report, first failure."""
+    safe = config.JB_JUDGE_MODEL.split("/")[-1].replace(".", "-")
+    label = job.run_id.replace("/", "__")
+    path = adapter.store / job.task / "eval_result" / f"eval_{label}" / f"{safe}_judge.json.judge_failed"
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+        for rubric in report.get("rubrics") or []:
+            for c in (rubric.get("result") or {}).get("criteria_results") or []:
+                if "Failed" in str(c.get("reasoning")):
+                    return str(c["reasoning"])[:400]
+    except (OSError, json.JSONDecodeError):
+        pass
+    return "judge produced no usable report; see the runner log"
+
+
 def pass_fraction(score: dict | None) -> float | None:
     if not score or not score.get("n_criteria"):
         return None
@@ -186,6 +233,7 @@ def run_job(
         "task": job.task, "arm": job.arm, "rep": job.rep, "run_id": job.run_id,
         "delivered": None, "score": None, "pass_frac": None, "drex_calls": None,
         "cost_usd": None, "tokens": None, "agent_wall_s": None, "attempts": None, "error": None,
+        "judge_error": None,
     }
     try:
         if judge_only:
@@ -197,6 +245,8 @@ def run_job(
         row["delivered"] = adapter.delivered(run_dir)
         row["score"] = adapter.score(run_dir, job.task)
         row["pass_frac"] = pass_fraction(row["score"])
+        if row["score"] is None:
+            row["judge_error"] = judge_failure(adapter, job)
         trajectory = adapter.trajectory(run_dir, obs_trunc=adapter.spec.obs_trunc)
         row["drex_calls"] = helper_calls(trajectory)
         row.update(usage_from_events(traj_dir_for(adapter, job)))
@@ -297,6 +347,7 @@ def print_summary(s: dict, arms: list[str]) -> None:
 def main() -> int:
     args = _ARGS
     wire_judge()
+    install_judge_shim()
     adapter = make_adapter("jb", None, "oc")
     if not isinstance(adapter, JobBenchAdapter):
         raise TypeError("expected the JobBench adapter")
@@ -344,7 +395,7 @@ def main() -> int:
             print(f"done {job.run_id} {job.task}: delivered={row['delivered']} "
                   f"pass_frac={_fmt(row['pass_frac'])} drex_calls={row['drex_calls']} "
                   f"cost={row['cost_usd']} wall={row['agent_wall_s']}s "
-                  f"error={row['error']}", flush=True)
+                  f"error={row['error']} judge_error={row['judge_error']}", flush=True)
 
     keys = {j.key for j in jobs}
     summary = summarise([r for k, r in store.rows.items() if k in keys], tasks, arms)
